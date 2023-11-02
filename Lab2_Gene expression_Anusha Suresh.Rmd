@@ -1,0 +1,158 @@
+---
+title: "Gene Expression Lab 2"
+output:
+  html_document:
+    df_print: paged
+---
+
+title: "Lab2_Gene expression"
+author: "Anusha Suresh"
+date: "2023-09-15"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Introduction
+
+**In this lab, we are going to work with a very popular time course cDNA data set from Paul Spellman’s lab at Stanford.  This microarray was designed with probes from the yeast Saccharomyces cerevisiae genome.  The data set includes 3 different experiments, each with its own time course (each array is a different time point) for measuring transcript levels that are induced by various cyclins.  The transcripts that respond to this stimulus are seen to be regulated at the different stages of the cell cycle.  The 3 experiments differ by the method that the yeast cultures were synchronized: α factor arrest, elutriation, and arrest of a cdc15 temperature-sensitive mutant.  The cdc15 time course experiment is the one that we will use in this lab to conduct some simple mathematical manipulations and plots. The paper, “Comprehensive Identification of Cell Cycle–regulated Genes of the Yeast Saccharomyces cerevisiae by Microarray Hybridization” is available on the course website.**
+
+Question 1) Go to class website under Course Documents > Data Sets and download the Spellman yeast cell cycle dataset zip file.
+
+Question 2) Unzip the text file, and read into R (Hint: using the read.table() function with a “header=T” argument and “row.names=1” argument is one method to do this).
+```{r}
+data <- read.table("C:\\Users\\anush\\Downloads\\spellman.txt", header=TRUE, row.names = 1)
+```
+
+Question 3) Look at the dimensions of the data frame and make sure that there are 6,178 genes and 77 arrays/sample.
+```{r}
+dim(data)
+```
+
+Question 4) Isolate only the cdc15 experiment (samples 23-46).
+```{r}
+cdc15 <- data[ ,23:46]
+#cdc15
+dim(cdc15)
+```
+
+Question 5)Now calculate a correlation matrix between the time points (use Pearson’s correlation).  Make sure to title the plot, label the axes, and provide a legend of the color gradient.  In the correlation calculation, make sure to use the argument ‘use’ and value=pairwise.complete.obs since all of these arrays have at least one missing value.
+```{r}
+library(ggplot2)
+cor_matrix <- cor(cdc15, use = "pairwise.complete.obs", method = "pearson")
+#cor_matrix
+cdc15_cor <- as.data.frame(as.table(cor_matrix))
+#cdc15_cor
+ggplot(cdc15_cor, aes(x=Var1, y=Var2, fill=Freq)) +
+  geom_tile() +
+  scale_fill_gradient(low="blue", high="red", name="Correlation") +
+  labs(title="Correlation Matrix between Time Points",
+       x="Time Points", y="Time Points") +
+  theme_minimal()+
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  coord_fixed()
+```
+
+Question 6)Select the gene YAL002W, which is VPS8, a membrane-binding component of the CORVET complex; involved in endosomal vesicle tethering and fusion in the endosome to vacuole protein targeting pathway.  Impute the missing values with the row mean (save as something).  Make sure to cast the gene to numeric.
+```{r}
+gene_name <- "YAL002W"
+gene_timepoints <- cdc15[gene_name, ]
+row_means <- rowMeans(gene_timepoints, na.rm = TRUE)
+row_means
+x <- is.na(gene_timepoints)
+gene_timepoints[x] <- row_means
+gene_timepoints
+```
+
+Question 7)Generate a profile plot of the same gene.  Title the plot, label the axes, and on the x-axis, provide the time points only for each array (no “cdc15_” prefix) so we can visualize the transcript pattern over time.  Use lwd in the plot command (lwd=line width).
+```{r}
+is.numeric(gene_timepoints)
+X <- as.numeric(gene_timepoints)
+Y <- as.numeric(gsub("cdc15_", "", colnames(cdc15)))
+plot(X, Y, type="l", lwd=2, col="blue",
+     xlab="Time points", ylab="Cdc15 experiment",
+     main="Time points profile of YAL002W gene",
+     yaxt = 'n'
+     )
+axis(2, at = Y, labels = paste0("CDC15_", Y), cex.axis=0.5)
+legend("bottomright", legend="YAL002W", col="blue", lwd=2)
+
+```
+
+Question 7 using ggplot2
+```{r}
+class(gene_timepoints)
+#install.packages("reshape2") 
+library(reshape2) 
+melted_data <- melt(gene_timepoints[, 2:ncol(gene_timepoints)])
+melted_data
+ggplot(melted_data, aes(x = variable, y = value)) + 
+  labs(title = "Time points profile of YAL002W gene", 
+       x = "cdc_15",
+       y = "timepoints") + 
+  geom_point() + 
+  #geom_line() +
+  geom_bar(stat = "identity") +
+  coord_flip() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  theme_minimal()
+```
+
+Question 8)Now let’s create a simple shiny app which allows the user to select and correlate any time point verse another time point across all genes. To do this, we can create a server and ui function within the same file, paste both into the R session, then call them with: >shinyApp(ui = ui, server = server)
+
+Use the Iris dataset example from the lecture as a model. You can remove the kmeans clustering code and just focus on plotting the columns (time points) of the CDC15 data matrix against each other.
+
+Hints: 
+  The ui function can start with:
+   ui <- 	fluidPage(
+     sidebarLayout(
+       sidebarPanel(
+        selectInput('xcol', 'X Variable', dimnames(dat)[[2]]),
+         
+         
+         The server function can start with:
+           server <- function(input, output) {
+             selectedData <- reactive({
+               dat[, c(input$xcol, input$ycol)]
+            })
+```{r}
+
+library(shiny)
+
+# Define UI
+ui <- fluidPage(
+  sidebarLayout(
+    sidebarPanel(
+      selectInput('xcol', 'X Variable', colnames(cdc15)),
+      selectInput('ycol', 'Y Variable', colnames(cdc15))
+    ),
+    mainPanel(
+      plotOutput('scatterplot')
+    )
+  )
+)
+
+# Define server
+server <- function(input, output) {
+  selectedData <- reactive({
+    cdc15[, c(input$xcol, input$ycol)]
+  })
+  
+  output$scatterplot <- renderPlot({
+    ggplot(selectedData(), aes(x = !!sym(input$xcol), y = !!sym(input$ycol))) +
+      geom_point(color = "red") +
+      labs(title = "Scatterplot", x = input$xcol, y = input$ycol)
+  })
+  
+  output$correlation <- renderText({
+    cor(selectedData(), use = "pairwise.complete.obs")
+  })
+}
+
+shinyApp(ui = ui, server = server)
+```
+
