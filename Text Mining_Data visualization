@@ -1,0 +1,341 @@
+---
+title: "Project 4 Data Visualization"
+author: "Anusha"
+date: "2023-11-06"
+output: html_document
+---
+Installing packages
+```{r}
+install.packages(c("tm","SnowballC","wordcloud", "wordcloud2", "RColorBrewer", 
+                   "syuzhet", "ggplot2", "plotly", "udpipe", "tidyverse",
+                   "tidytext", "textrank", "rvest", "shiny", "highcharter"))
+```
+
+Loading all the libraries
+```{r}
+library(tm)
+library(SnowballC)
+library(wordcloud)
+library(wordcloud2)
+library(RColorBrewer)
+library(syuzhet)
+library(ggplot2)
+library(plotly)
+library(udpipe)
+library(tidyverse)
+library(tidytext)
+library(textrank)
+library(rvest)
+library(shiny)
+library(highcharter) 
+```
+
+Reading the text file containing the conversation
+```{r}
+text <- readLines("C:\\Users\\anush\\OneDrive\\Desktop\\TextMining\\chatgpt_emo_convo.txt")
+#text <- readLines(file.choose())
+```
+
+1) Text Summarisation
+```{r}
+text_sentences <- tibble(text) %>%
+  tidytext::unnest_tokens(sentence, text, token = "sentences") %>%
+  dplyr::mutate(sentence_id = row_number()) %>%
+  dplyr::select(sentence_id, sentence)
+text_sentences
+
+text_words <- text_sentences %>%
+  tidytext::unnest_tokens(word, sentence)
+text_words
+
+text_words <- text_words %>%
+  dplyr::anti_join(stop_words, by = "word")
+text_words
+
+text_summary <- textrank_sentences(data = text_sentences, 
+                                      terminology = text_words)
+text_summary
+
+# Creating an interactive column chart
+ggplotly(text_summary[["sentences"]] %>%
+           ggplot(aes(textrank_id, textrank, fill = textrank_id)) +
+           geom_col() +
+           theme_minimal() +
+           scale_fill_viridis_c() +
+           guides(fill = "none") +
+           labs(x = "Sentence",
+                y = "TextRank score",
+                title = "Informative sentences appear scattered throughout the file"))
+```
+
+2) Part of Speech Tagging
+```{r}
+# Loading a pre-trained model for English
+ud_model <- udpipe_download_model(language = "english")
+ud_model <- udpipe_load_model(ud_model$file_model)
+
+# Defining a function for part-of-speech tagging
+pos_tagging <- function(text) {
+  x <- udpipe_annotate(ud_model, x = text)
+  x <- as.data.frame(x)
+  return(x)
+}
+pos_data <- pos_tagging(text)
+head(pos_data)
+
+# Counting the frequencies of each part of speech
+pos_freq <- table(pos_data$upos)
+
+# Converting frequencies to a data frame
+pos_df <- data.frame(PartOfSpeech = names(pos_freq), Frequency = as.numeric(pos_freq))
+
+# Creating an interactive bar chart
+ggplotly(ggplot(pos_df, aes(x = PartOfSpeech, y = Frequency, fill = PartOfSpeech)) +
+           geom_bar(stat = "identity") +
+           labs(title = "Distribution of Parts of Speech", x = "Part of Speech", y = "Frequency") +
+           theme_minimal()+
+           coord_flip())
+```
+
+3) Frequency of Adjectives
+```{r}
+# Loading a pre-trained model for English
+ud_model <- udpipe_download_model(language = "english")
+ud_model <- udpipe_load_model(ud_model$file_model)
+
+# Defining a function to get a list of adjectives and their frequencies
+get_adjective_list <- function(text) {
+  x <- udpipe_annotate(ud_model, x = text)
+  x <- as.data.frame(x)
+  adjectives <- subset(x, upos == "ADJ")
+  adjective_list <- as.data.frame(table(adjectives$lemma))
+  colnames(adjective_list) <- c("Adjective", "Frequency")
+  return(adjective_list)
+}
+
+adjective_list <- get_adjective_list(text)
+print(adjective_list)
+
+# Creating an interactive treemap
+treemap <- plot_ly(
+  type = "treemap",
+  labels = adjective_list$Adjective,
+  parents = "",
+  values = adjective_list$Frequency,
+  hoverinfo = "label+value+percent root",
+  textinfo = "label+value",
+  textfont = list(size = 15),
+  pathbar = list(visible = FALSE)
+)
+layout(treemap, title = "Adjective Frequency Treemap")
+```
+
+Data preprocessing 
+```{r}
+# Loading the data as a corpus
+text_doc <- Corpus(VectorSource(text))
+
+#Replacing "/", "@" and "|" with space
+toSpace <- content_transformer(function (x , pattern ) gsub(pattern, " ", x))
+text_doc <- tm_map(text_doc, toSpace, "/")
+text_doc <- tm_map(text_doc, toSpace, "@")
+text_doc <- tm_map(text_doc, toSpace, "\\|")
+
+# Converting the text to lower case
+text_doc <- tm_map(text_doc, content_transformer(tolower))
+
+# Removing numbers
+text_doc <- tm_map(text_doc, removeNumbers)
+
+# Removing english common stopwords
+text_doc <- tm_map(text_doc, removeWords, stopwords("english"))
+
+# Removing own stop words
+text_doc <- tm_map(text_doc, removeWords, c("also", "hi", "can", "just", "like", "even", "make"))
+
+# Removing punctuations
+text_doc <- tm_map(text_doc, removePunctuation)
+
+# Removing extra white spaces
+text_doc <- tm_map(text_doc, stripWhitespace)
+
+# Text stemming - reducing words to their root form
+text_doc <- tm_map(text_doc, stemDocument)
+
+# Building a term-document matrix
+text_doc_tdm <- TermDocumentMatrix(text_doc)
+tdm_m <- as.matrix(text_doc_tdm)
+```
+
+4a) Counting word Frequency
+```{r}
+# Sorting by decreasing value of frequency
+tdm_v <- sort(rowSums(tdm_m),decreasing=TRUE)
+tdm_d <- data.frame(word = names(tdm_v),freq=tdm_v)
+
+# Displaying the top 10 most frequent words
+head(tdm_d, 10)
+
+#4 Plotting the most frequent words in R Shiny
+# Defining the UI
+ui <- fluidPage(
+  titlePanel("Interactive Bar Plot"),
+  sidebarLayout(
+    sidebarPanel(
+      sliderInput("num_words", "Number of Words to Display:",
+                  min = 1, max = nrow(tdm_d), value = 10)
+    ),
+    mainPanel(
+      plotOutput("barplot")
+    )
+  )
+)
+
+# Defining server logic
+server <- function(input, output) {
+  
+  output$barplot <- renderPlot({
+    barplot(tdm_d[1:input$num_words,]$freq, las = 2, 
+            names.arg = tdm_d[1:input$num_words,]$word, 
+            col = "lightblue", 
+            main = paste("Top", input$num_words, "most frequent words"),
+            ylab = "Word frequencies")
+  })
+}
+# Running the Shiny app
+shinyApp(ui = ui, server = server)
+```
+
+4b) Making a word cloud interactive in R shiny for the 
+```{r}
+ui <- fluidPage(
+  sidebarLayout(
+    sidebarPanel(
+      sliderInput("min_freq", "Minimum Frequency:",
+                  min = 1, max = max(tdm_d$freq), value = 5),
+      sliderInput("max_words", "Maximum Number of Words:",
+                  min = 1, max = 100, value = 50)
+    ),
+    mainPanel(
+      wordcloud2Output("wordcloud")
+    )
+  )
+)
+
+server <- function(input, output) {
+  output$wordcloud <- renderWordcloud2({
+    filtered_data <- subset(tdm_d, freq >= input$min_freq)
+    filtered_data <- head(filtered_data, input$max_words)
+    wordcloud2(data = data.frame(word = filtered_data$word, freq = filtered_data$freq), color="random-light")
+  })
+}
+shinyApp(ui, server)
+```
+
+5) Sentiment Analysis
+```{r}
+syu <- get_sentiment(text, method="syuzhet")
+head(syu)
+summary(syu)
+
+# bing
+bing <- get_sentiment(text, method="bing")
+head(bing)
+summary(bing)
+#affin
+afinn <- get_sentiment(text, method="afinn")
+head(afinn)
+summary(afinn)
+
+rbind(
+  sign(head(syu)),
+  sign(head(bing)),
+  sign(head(afinn))
+)
+
+d <- get_nrc_sentiment(text)
+head (d,10)
+td <- data.frame(t(d))
+td_new <- data.frame(rowSums(td[2:35]))
+names(td_new)[1] <- "count"
+td_new <- cbind("sentiment" = rownames(td_new), td_new)
+rownames(td_new) <- NULL
+td_new2<-td_new[1:8,]
+
+# Assuming 'd' is your data frame
+emotions <- colSums(prop.table(d[, 1:8]))
+names(emotions) <- colnames(d)[1:8]
+
+# Get data in a format suitable for ggplot2
+df <- data.frame(emotion = names(emotions), percentage = emotions * 100)
+
+hc <- highchart() %>%
+  hc_chart(type = "column", polar = TRUE) %>% 
+  hc_xAxis(categories = df$emotion) %>% 
+  hc_series(list(
+    name = "Emotion percentage",
+    data = df$percentage,
+    colorByPoint = TRUE,
+    type = "column",
+    colors = c("red", "lightgreen", "orange", "blue","pink","purple","lightyellow","lightblue"),
+    showInLegend = FALSE
+  )
+  )
+hc
+```
+
+7) Word Associations
+```{r}
+associations1 = findAssocs(text_doc_tdm, c('sleep'), 0.25) 
+associations_sleep <- as.data.frame(associations1) 
+ui <- fluidPage(
+  
+  # Application title
+  titlePanel("Interactive Associations Plot"),
+  
+  # Sidebar layout
+  sidebarLayout(
+    sidebarPanel(
+      # Add input elements for filters
+      sliderInput("slider_threshold", "Threshold", min = 0, max = 1, value = 0.25, step = 0.05),
+      checkboxInput("checkbox_filter", "Filter Data", value = TRUE)
+    ),
+    
+    # Main panel for displaying the plot
+    mainPanel(
+      plotlyOutput("associations_plot")
+    )
+  )
+)
+
+# Define server logic
+server <- function(input, output) {
+  
+  output$associations_plot <- renderPlotly({
+    # Apply filters based on user input
+    threshold <- input$slider_threshold
+    filter_data <- input$checkbox_filter
+    
+    associations1 <- findAssocs(text_doc_tdm, c('sleep'), threshold)
+    associations_sleep <- as.data.frame(associations1)
+    
+    if (filter_data) {
+      # Apply additional filters based on user input
+      # For example, you can add more filters here
+    }
+    
+    ggplotly(
+      ggplot(associations_sleep, aes(y = rownames(associations_sleep))) + 
+        geom_point(aes(x = associations_sleep$sleep), data = associations_sleep, size = 3, color = "darkred") + 
+        coord_flip() +
+        theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+        theme(text = element_text(size = 12), axis.title.y = element_blank()) +
+        xlab("Association Strength") + ylab("Terms")
+    )
+  })
+}
+
+# Run the application 
+shinyApp(ui = ui, server = server)
+```
+
