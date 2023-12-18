@@ -1,0 +1,355 @@
+---
+title: "Anusha_Suresh_DV_final_project"
+author: "Anusha"
+date: "2023-12-07"
+output: html_document
+---
+Data Preprocessing 1 with original data files
+```{r}
+# mrna_data <- read.table("C:\\Users\\anush\\Downloads\\data_mrna_illumina_microarray.txt", header = T)
+
+# Import Book1 manually
+# clinical_data <- Book1
+# dim(mrna_data)
+# dim(clinical_data)
+# 
+# n <- mrna_data$Hugo_Symbol
+# mrna_data <- as.data.frame(t(mrna_data[,-1]))
+# colnames(mrna_data) <- n
+# mrna_data$myfactor <- factor(row.names(mrna_data))
+# 
+# str(mrna_data)
+# gene_exp <- mrna_data[-1,c("ESR1", "PGR", "GATA3", "FOXA1")]
+# str(gene_exp)
+# 
+# rownames(gene_exp) <- gsub("\\.", "-", rownames(gene_exp))
+# rownames(gene_exp)
+# order <- match(clinical_data$`Patient ID`, rownames(gene_exp))
+# order
+# reordered_data <- gene_exp[order,]
+# 
+# dim(clinical_data)
+# dim(reordered_data)
+# 
+# reordered_data$Row.names <- rownames(reordered_data)
+# 
+# bc_data <- merge(clinical_data, reordered_data, by.x = "Patient ID", by.y = "Row.names", all.x = TRUE)
+```
+After this the file bc_data was downloaded and few changes were made manually. Load the bc_data file and start the analysis from here.
+Preprocesing 2
+```{r}
+bc_data <- read.csv("C:\\Users\\anush\\Downloads\\bc_data.csv", header = T, row.names = 1)
+head(rownames(bc_data),10)
+rownames(bc_data) <- bc_data[,1]
+bc_data <- bc_data[,-1]
+bc_data <- bc_data[!grepl("^MTS-", rownames(bc_data)), ]
+gene_exp <- bc_data[,c("ESR1","PGR","GATA3","FOXA1")]
+gene_exp[gene_exp == "NA"] <- NA
+col_means <- colMeans(gene_exp, na.rm = TRUE)
+col_means
+for (col in colnames(bc_data)) {
+  if (any(is.na(bc_data[, col]))) {
+    bc_data[is.na(bc_data[, col]), col] <- col_means[col]
+  }
+}
+```
+
+Age distribution of patients
+```{r}
+library(plotly)
+library(ggplot2)
+bc_data$Age_at_Diagnosis <- as.numeric(bc_data$Age_at_Diagnosis)
+ggplot(bc_data, aes(x = Age_at_Diagnosis)) +
+  geom_histogram(binwidth = 5, fill = "skyblue", color = "black") +
+  labs(title = "Age Distribution at Diagnosis", x = "Age", y = "Frequency")
+
+#Density Plot
+ggplotly(ggplot(bc_data, aes(x=Age_at_Diagnosis, fill=Cancer_Type_Detailed)) +
+  geom_density(alpha=0.5) +
+  labs(title="Density Plot of Age at Diagnosis by Cancer Type", x="Age at Diagnosis", y="Density"))
+```
+
+Cancer Type distribution
+```{r}
+library(plotly)
+
+interactive_plot <- ggplot(bc_data, aes(x = factor(Cancer_Type_Detailed))) +
+  geom_bar(fill = "lightgreen") +
+  labs(title = "Cancer Type Distribution", x = "Cancer Type", y = "Count") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+interactive_plot <- ggplotly(interactive_plot)
+
+interactive_plot
+
+```
+
+Type of surgery
+```{r}
+library(plotly)
+
+surgery_counts <- table(bc_data$Type_of_Breast_Surgery)
+
+plot_ly(labels = names(surgery_counts), values = surgery_counts, type = "pie") %>%
+  layout(title = "Interactive Pie Chart of Type of Breast Surgery")
+
+```
+Type of breast surgery
+```{r}
+library(dplyr)
+# Filter data for relevant columns and rows
+filtered_data <- bc_data %>%
+  filter(Chemotherapy == 'YES' | Hormone_Therapy == 'YES' | Radio_Therapy == 'YES')
+
+# Create a table of counts for treatments by type of breast surgery
+treatment_surgery_counts <- filtered_data %>%
+  group_by(Type_of_Breast_Surgery) %>%
+  summarise(
+    Chemotherapy = sum(Chemotherapy == 'YES'),
+    Hormone_Therapy = sum(Hormone_Therapy == 'YES'),
+    Radio_Therapy = sum(Radio_Therapy == 'YES')
+  ) %>%
+  tidyr::gather(key = "Treatment", value = "Count", -Type_of_Breast_Surgery)
+
+# Create a stacked bar plot
+ggplot(treatment_surgery_counts, aes(x = Type_of_Breast_Surgery, y = Count, fill = Treatment)) +
+  geom_bar(stat = "identity") +
+  labs(x = 'Type of Breast Surgery', y = 'Count', title = 'Distribution of Treatments by Type of Breast Surgery') +
+  scale_fill_brewer(palette = "Set3") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+Overall Survival by Tumor Stage
+```{r}
+# Load necessary library
+library(ggplot2)
+
+# Convert Tumor_Stage to a factor
+bc_data$Tumor_Stage <- as.factor(bc_data$Tumor_Stage)
+
+# Create a box plot of Overall_Survival_Months by Tumor_Stage
+ggplot(bc_data, aes(x=Tumor_Stage, y=Overall_Survival_Months)) +
+  geom_boxplot() +
+  theme_minimal() +
+  labs(title="Box Plot of Overall Survival by Tumor Stage", x="Tumor Stage", y="Overall Survival (Months)")
+
+```
+
+Heatmap of correlation between genes
+```{r}
+library(reshape2)
+
+# Calculating correlation matrix
+correlation_matrix <- cor(gene_exp, use = "complete.obs")
+
+# Convert to long format for visualization
+correlation_data <- melt(correlation_matrix)
+
+# Plotting correlation heatmap
+ggplot(correlation_data, aes(Var1, Var2, fill = value)) +
+  geom_tile() +
+  scale_fill_gradient(low = "lightblue", high = "darkblue") +
+  labs(title = "Correlation Heatmap of Gene Expression", x = "Genes", y = "Genes")
+
+```
+Gene expression groups 3D visualization
+```{r}
+library(plotly)
+
+plot_ly(bc_data, x = ~ESR1, y = ~FOXA1, z = ~GATA3, color = ~ER_Status, mode = "markers", type = "scatter3d") %>%
+  layout(scene = list(xaxis = list(title = "ESR1"),
+                      yaxis = list(title = "FOXA1"),
+                      zaxis = list(title = "GATA3")),
+         title = "3D Scatter Plot of ESR1, FOXA1, and GATA3")
+
+```
+Relationship between ESR1 and GATA3 expression by cancer subtype and proliferation
+```{r}
+ggplotly(ggplot(bc_data) +
+  geom_point(aes(x = GATA3, y = ESR1, colour = Pam50_Claudin.low_subtype, shape = three_Gene_classifier_subtype), size = 0.9)+
+   labs(title = "Relationship between ESR1 and GATA3 expression by cancer subtype and proliferation"))
+```
+GATA3 expression by ER status
+```{r}
+ggplot(bc_data, aes(x = ER_Status, y = GATA3, colour = HER2_Status)) +
+  geom_boxplot()+
+   labs(title = "GATA3 expression by ER status")
+```
+
+Kaplan Analysis in GATA3 expression groups
+```{r}
+percentile_75 <- quantile(bc_data$GATA3, 0.75)
+bc_data$group <- ifelse(bc_data$GATA3 >= percentile_75, 1, 0)
+head(bc_data)
+library(survival)
+survival_data <- Surv(time = bc_data$Overall_Survival_Months, 
+                      event = as.numeric(bc_data$Overall_Survival_Status == "1:DECEASED"))
+km_fit <- survfit(survival_data ~ group, type = "kaplan-meier", data = bc_data)
+
+library(survminer)
+library(splines)
+ggsurvplot(km_fit,           
+                     legend.labs = c("Low", "High"),
+                     title = "Kaplan-Meier Curves for GATA3 Expression Groups")
+```
+Kaplan Analysis in ESR1 expression groups
+```{r}
+percentile_75 <- quantile(bc_data$ESR1, 0.75)
+bc_data$group <- ifelse(bc_data$ESR1 >= percentile_75, 1, 0)
+library(survival)
+survival_data <- Surv(time = bc_data$Overall_Survival_Months, 
+                      event = as.numeric(bc_data$Overall_Survival_Status == "1:DECEASED"))
+km_fit <- survfit(survival_data ~ group, type = "kaplan-meier", data = bc_data)
+
+library(survminer)
+library(splines)
+ggsurvplot(km_fit,           
+                     legend.labs = c("Low", "High"),
+                     title = "Kaplan-Meier Curves for ESR1 Expression Groups")
+```
+
+
+ML
+Loading the libraries
+```{r}
+library(tidyverse)
+library(dplyr)
+library(car)
+library(corrplot)
+library(pROC)
+library(MLmetrics)
+library(rpart)
+library(rpart.plot) 
+library(randomForest)
+library(varImp)
+library(gbm)
+library(caret)
+```
+
+Loading the data
+```{r}
+url <- "https://archive.ics.uci.edu/ml/machine-learning-databases/breast-cancer-wisconsin/breast-cancer-wisconsin.data"
+data <- read.csv(file = url, header = FALSE,
+                 col.names = c("ID","clump_thickness", "uniformity_size", "uniformity_shape", "marginal_adhesion", "single_epithelial_cell_size", "bare_nuclei", "bland_chromatin", "normal_nucleoli","mitoses", "diagnosis"))
+
+str(data)
+sum(data$bare_nuclei == "?")
+data <- select(data, -1)
+data <- data[data$bare_nuclei != "?",] %>% mutate(bare_nuclei = as.integer(as.character((bare_nuclei))))
+data <- data %>% mutate(diagnosis = ifelse(diagnosis == 2, 0, 1),
+                        diagnosis = as.factor(diagnosis))
+summary(data)
+```
+
+Distribution of diagnosis
+```{r}
+ggplot(data, aes(x = diagnosis)) +
+  geom_bar(fill = "#fc9272") +
+  ggtitle("Distribution of Diagnosis in the Entire Dataset") +
+  theme_minimal() +
+  theme(legend.position = "none")
+```
+
+Correlation
+```{r}
+correlation <- cor(data[,-10])
+corrplot(correlation, type = "lower", col = c("#fcbba1", "#b2d2e8"), addCoef.col = "black", tl.col = "black")  
+```
+
+Split data into training and test set
+```{r}
+set.seed(3011) 
+train_index <- sample(nrow(data), size = round(0.75 * nrow(data)), replace = FALSE)
+train <- data[train_index,]
+test <- data[-train_index,]
+```
+
+Logistic Regression
+```{r}
+lm <- glm(formula = diagnosis ~ ., data = train, family = binomial())
+summary(lm)
+vif(lm)
+lm2 <- glm(formula = diagnosis ~ ., data = train %>% select(-c(uniformity_size, single_epithelial_cell_size, mitoses)), family = binomial())
+summary(lm2)
+lm3 <- glm(formula = diagnosis ~ ., data = train %>% select(-c(uniformity_size, single_epithelial_cell_size, bare_nuclei, mitoses)), family = binomial())
+summary(lm3)
+pred_train_lm <- predict(lm3, train, type = 'response')
+AUC_train_lm <- roc(train$diagnosis, pred_train_lm, percent = TRUE, plot = TRUE, print.auc = TRUE)
+
+accuracy <- 0
+f1 <- 0
+threshold <- 0
+
+for(i in seq(0.1, 0.9, by = 0.01)){
+  pred_cat_train <- ifelse(pred_train_lm < i, 0, 1)
+  a = Accuracy(y_true = train$diagnosis, y_pred = pred_cat_train)
+  b = F1_Score(y_true = train$diagnosis, y_pred = pred_cat_train)
+  
+  if(a > accuracy & b > f1){
+    accuracy = a
+    f1 = b
+    threshold = i
+  }
+}
+accuracy
+f1 
+threshold 
+```
+
+Apply final regression
+```{r}
+pred_test_lm <- predict(lm3, test, type = 'response')
+
+AUC_test_lm <- roc(test$diagnosis, pred_test_lm, percent = TRUE, plot = TRUE, print.auc = TRUE)
+pred_cat_test <- ifelse(pred_test_lm >= 0.48, 1, 0)
+Accuracy(y_true = test$diagnosis, y_pred = pred_cat_test) 
+F1_Score(y_true = test$diagnosis, y_pred = pred_cat_test) 
+ConfusionMatrix(y_true = test$diagnosis, y_pred = pred_cat_test)
+```
+
+Random Forest
+```{r}
+AUC_train_bestrf <- 0
+AUC_test_bestrf <- 0
+AUC_rf <- data.frame(AUC_train_rf = numeric(), AUC_test_rf = numeric()) 
+
+set.seed(160)
+rf_parameters <- data.frame(nodesize = round(runif(10,5,20)),
+                            sampsize= round(runif(10,1,400)),
+                            mtry = round(runif(10,1,10)),
+                            ntree = round(runif(10,1,400)))
+
+for(paracomb_rf in 1:nrow(rf_parameters)){
+  random_forest <- randomForest(diagnosis ~ ., data = train,
+                                nodesize = rf_parameters[paracomb_rf, "nodesize"],
+                                sampsize = rf_parameters[paracomb_rf, "sampsize"],
+                                mtry = rf_parameters[paracomb_rf, "mtry"],
+                                ntree = rf_parameters[paracomb_rf, "ntree"])
+  
+  pred_train_rf <- as.data.frame(predict(random_forest, train, type='prob'))
+  AUC_train_rf <- roc(train$diagnosis, pred_train_rf$`1`, percent = TRUE, plot = TRUE)
+  
+  pred_test_rf <- as.data.frame(predict(random_forest, test, type='prob'))
+  AUC_test_rf <- roc(test$diagnosis, pred_test_rf$`1`, percent = TRUE, plot = TRUE) 
+  
+  AUC_rf[paracomb_rf, ] <- c(round(AUC_train_rf$au, 2), round(AUC_test_rf$auc, 2))
+  AUC_train_bestrf = ifelse(AUC_train_bestrf > AUC_train_rf$auc, AUC_train_bestrf, AUC_train_rf$auc)
+  AUC_test_bestrf = ifelse(AUC_test_bestrf > AUC_test_rf$auc, AUC_test_bestrf, AUC_test_rf$auc)
+}
+```
+
+Best random forest
+```{r}
+best_random_forest <- randomForest(diagnosis ~ ., data = train,
+                                   nodesize = 9,
+                                   sampsize = 329,
+                                   mtry = 7,
+                                   ntree = 210)
+best_random_forest
+```
+
+```{r}
+# Identify the most significant independent variables
+varImpPlot(best_random_forest)
+```
+
