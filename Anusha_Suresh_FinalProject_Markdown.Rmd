@@ -1,0 +1,318 @@
+---
+title: "Gene_exp_final_project"
+author: "Anusha"
+date: "2023-11-16"
+output: html_document
+---
+
+Final Project 1. For a final project, you will be conducting an analysis pipeline in attempt to answer some questions about the data set being used. The data selected should include some sort of class structure with different levels (e.g. disease vs. normal, treated vs. non-treated, age\<65 vs. age≥65, low dose vs. high dose vs. control etc.). Each project will include analysis of a publicly available data set from some expression database (e.g., Stanford MicroArray Database, Gene Expression Omnibus, EMBL ArrayExpress). Link to the dataset: <https://www.ncbi.nlm.nih.gov/sites/GDSbrowser?acc=GDS507> Link to the paper: <https://pubmed.ncbi.nlm.nih.gov/14641932/>
+
+```{r}
+#Reading the files
+renal_data <- read.table("C:\\Users\\anush\\Downloads\\RCC_data_file.txt")
+colnames(renal_data) <- renal_data[1,]
+colnames(renal_data)
+renal_data <- renal_data[-1,]
+renal_data <- as.data.frame(renal_data)
+dim(renal_data)
+renal_data <- renal_data[-22646,]
+rownames(renal_data) <- renal_data[,1]
+head(rownames(renal_data),10)
+renal_data <- renal_data[,c(-1,-2)]
+dim(renal_data)
+head(renal_data,10)
+
+#Reading the annotation file
+renal_ann <- readxl::read_excel("C:\\Users\\anush\\Downloads\\Renal_Annotation.xlsx")
+dim(renal_ann)
+renal_ann
+for(i in 1:17) {
+  if(i>9 & i<15){
+    current_name <- colnames(renal_data)[i]
+    new_name <- paste0(current_name, sep="_", "Normal")
+    colnames(renal_data)[i] <- new_name}
+  else{
+    current_name <- colnames(renal_data)[i]
+    new_name <- paste0(current_name, sep="_", "Tumor")
+    colnames(renal_data)[i] <- new_name}
+}
+col_names <- colnames(renal_data)
+library(tidyverse)
+rearranged_renal_data <- renal_data %>%
+  select(matches("Tumor"), everything(), matches("Normal"))
+colnames(rearranged_renal_data)
+```
+
+Limma package for pre-normalization graph
+```{r}
+# Check data types
+str(rearranged_renal_data)
+# Identify non-numeric columns
+non_numeric_columns <- sapply(rearranged_renal_data, function(x) !is.numeric(x))
+non_numeric_columns <- colnames(rearranged_renal_data)[non_numeric_columns]
+non_numeric_columns
+# Convert non-numeric columns to numeric if appropriate
+rearranged_renal_data[non_numeric_columns] <- lapply(rearranged_renal_data[non_numeric_columns], as.numeric)
+# Check data types again
+str(rearranged_renal_data)
+library(limma)
+log2_fc <- rowMeans(rearranged_renal_data[, 1:12]) - rowMeans(rearranged_renal_data[, 13:17])
+average_expr <- (rowMeans(rearranged_renal_data[, 1:12]) + rowMeans(rearranged_renal_data[, 13:17])) / 2
+
+plot(average_expr, log2_fc, main = "MA Plot (Prenormalized Data)", xlab = "A (Average Expression)", ylab = "M (Log2 Fold Change)")
+abline(h = 0, col = "red", lty = 2)
+```
+
+Global normalization graph
+```{r}
+library(limma)
+global_normalized_data <- normalizeBetweenArrays(as.matrix(rearranged_renal_data))
+
+log2_fc <- rowMeans(global_normalized_data[, 1:12]) - rowMeans(global_normalized_data[, 13:17])
+average_expr <- rowMeans(cbind(global_normalized_data[, 1:12], global_normalized_data[, 13:17]))
+
+plot(average_expr, log2_fc, main = "MA Plot for Global Normalized Data", 
+     xlab = "A (Average Expression)", ylab = "M (Log2 Fold Change)")
+abline(h = 0, col = "red", lty = 2)
+```
+
+Z score normalization
+```{r}
+normalized_renal_data <- scale(rearranged_renal_data)
+log2_fc <- rowMeans(normalized_renal_data[, 1:12]) - rowMeans(normalized_renal_data[, 13:17])
+average_expr <- rowMeans(cbind(normalized_renal_data[, 1:12], normalized_renal_data[, 13:17]))
+
+plot(average_expr, log2_fc, main = "MA Plot for Z score Normalized Data", 
+     xlab = "A (Average Expression)", ylab = "M (Log2 Fold Change)")
+abline(h = 0, col = "red", lty = 2)
+```
+
+Quantile normalization
+```{r}
+library(preprocessCore)
+quantile_normalized_data <- normalize.quantiles(as.matrix(rearranged_renal_data))
+
+log2_fc_quantile <- rowMeans(quantile_normalized_data[, 1:12]) - rowMeans(quantile_normalized_data[, 13:17])
+average_expr_quantile <- rowMeans(cbind(quantile_normalized_data[, 1:12], quantile_normalized_data[, 13:17]))
+
+plot(average_expr_quantile, log2_fc_quantile, main = "MA Plot for Quantile Normalized Data",
+     xlab = "A (Average Expression)", ylab = "M (Log2 Fold Change)")
+abline(h = 0, col = "red", lty = 2)
+```
+
+2.The student should first test for outlier samples and provide visual proof. Remove these outliers.
+```{r}
+renal.df <- as.data.frame(normalized_renal_data)
+renal.df[] <- lapply(renal.df , as.numeric)
+
+cor_matrix <- cor(renal.df, use = "pairwise.complete.obs", method = "pearson")
+renal_cor <- as.data.frame(as.table(cor_matrix))
+ggplot(renal_cor, aes(x=Var1, y=Var2, fill=Freq)) +
+  geom_tile() +
+  scale_fill_gradient(low="blue", high="red", name="Correlation") +
+  labs(title="Correlation Matrix",
+       x="Accession number", y="Accession number") +
+  theme_minimal()+
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  coord_fixed()
+```
+
+Avg. correlation plot
+```{r}
+dat.avg <- apply(cor_matrix,1,mean)
+par(oma=c(3,0.1,0.1,0.1))
+plot(c(1,length(dat.avg)),range(dat.avg),type="n",xlab="Sample",ylab="Avg r",main="Avg correlation of Tumor/Normal samples",axes=F)
+points(dat.avg,bg="red",col=1,pch=21,cex=1.25)
+axis(1,at=c(1:length(dat.avg)),labels=dimnames(normalized_renal_data)[[2]],las=2,cex.lab=0.4,cex.axis=0.6)
+axis(2)
+abline(v=seq(0.5,62.5,1),col="grey")
+```
+
+Remove outliers
+```{r}
+columns_to_remove <- c("GSM12083_Tumor")
+indices_to_remove <- which(colnames(rearranged_renal_data) %in% columns_to_remove)
+new_renal_data <- rearranged_renal_data[ , -indices_to_remove]
+colnames(new_renal_data)
+dim(new_renal_data)
+```
+
+Normalize again
+```{r}
+new_renal <- scale(new_renal_data)
+log2_fc <- rowMeans(new_renal[, 1:11]) - rowMeans(new_renal[, 12:16])
+average_expr <- rowMeans(cbind(new_renal[, 1:11], new_renal[, 12:16]))
+
+plot(average_expr, log2_fc, main = "MA Plot for Z score Normalized Data after outlier removal", 
+     xlab = "A (Average Expression)", ylab = "M (Log2 Fold Change)")
+abline(h = 0, col = "red", lty = 2)
+```
+
+3)  Then, filter out genes that have low expression values using some criterion.
+```{r}
+gene_variances <- apply(new_renal, 1, var)
+head((gene_variances),30)
+# Determine the threshold as the top 75% of variances
+threshold <- quantile(gene_variances, 0.25)  # Replace 'variance_values' with your actual variance values
+
+# Filter genes with variances above the threshold
+filtered_genes <- gene_variances[gene_variances >= threshold]
+length(filtered_genes)
+head((names(filtered_genes)),10)
+genes_above_threshold <- names(filtered_genes)
+filtered_renal_data <- new_renal[genes_above_threshold,]
+dim(filtered_renal_data)
+```
+
+4)  Next, conduct some method of feature selection with a statistical test or other machine learning method. The type of test will depend upon how many factor levels are included in your data set. For example. two conditions would require a two-sample test, while greater than two conditions would require other tests. Adjust for multiplicity, then provide the number of genes retained with the associated score (p-value, weight, test statistic, etc.) and threshold value that you used. Plot the scores of those genes retained in a histogram.
+```{r}
+t.test.all.genes <- function(x,s1,s2) {
+  x1 <- x[s1]
+  x2 <- x[s2]
+  x1 <- as.numeric(x1)
+  x2 <- as.numeric(x2)
+  t.out <- t.test(x1,x2, alternative="two.sided",var.equal=T)
+  out <- as.numeric(t.out$p.value)
+  return(out)
+}
+pv <- apply(filtered_renal_data,1,t.test.all.genes,s1=1:11,s2=12:16)
+```
+Plotting Histogram of p-values without adjustment
+```{r}
+# Assuming 'pv' contains the p-values obtained from statistical tests
+significant_p_values <- pv[pv < 0.05]  # Filtering p-values less than 0.05
+
+# Plotting histogram of significant p-values
+hist(significant_p_values, breaks = 20, col = "skyblue", xlab = "p-values", 
+     ylab = "Frequency", main = "Histogram of p-values < 0.05")
+```
+Plotting with adjustment
+```{r}
+# Applying Benjamini-Hochberg correction for multiple testing
+adjusted_p_values <- p.adjust(pv, method = "BH")
+
+# Filtering adjusted p-values less than 0.05
+significant_adjusted_p_values <- adjusted_p_values[adjusted_p_values < 0.05]
+
+# Check the structure of significant_adjusted_p_values
+str(significant_adjusted_p_values)
+
+# If the type is character or something other than numeric, convert it to numeric
+if (!is.numeric(significant_adjusted_p_values)) {
+  significant_adjusted_p_values <- as.numeric(as.character(significant_adjusted_p_values))
+}
+
+# Plot histogram if there are valid numeric values
+if (length(significant_adjusted_p_values) > 0) {
+  hist(significant_adjusted_p_values, breaks = 20, col = "skyblue", 
+       xlab = "Adjusted p-values", ylab = "Frequency", 
+       main = "Histogram of adjusted p-values < 0.05")
+} else {
+  print("No valid significant adjusted p-values found.")
+}
+```
+
+5)  Next, subset your data by the genes that you determined and use one of the clustering or dimensionality reduction methods discussed in class to visualize the samples in two-dimensional space (xy scatter plot, dendrogram, etc.).
+```{r}
+significant_genes <- (significant_p_values <= 0.05)
+
+subset_renal_data <- filtered_renal_data[significant_genes,]
+
+pca_result <- prcomp(t(subset_renal_data))  # Transpose data for samples as rows
+pca_scores <- pca_result$x
+
+num_tumor_samples <- 11  # Number of tumor samples
+num_normal_samples <- 16 - num_tumor_samples  # Number of normal samples
+sample_groups <- factor(c(rep("Tumor", num_tumor_samples), rep("Normal", num_normal_samples)))
+
+plot(pca_scores[, 1], pca_scores[, 2], 
+     xlab = "Principal Component 1", ylab = "Principal Component 2", 
+     main = "PCA: Samples in 2D Space", 
+     col = as.numeric(sample_groups),  # Convert categorical to numeric for color representation
+     pch = 19)  # Use solid points (pch = 19)
+legend("topright", legend = levels(sample_groups), col = c("black", "red"), pch = 19, title = "Sample Groups")
+```
+ scree plot
+```{r}
+scree <- round(pca_result$sdev^2 / sum(pca_result$sdev^2) * 100)
+sum <- sum(scree[1:2])
+sum
+scree_df <- data.frame(PC = 1:length(scree), Scree = scree)
+ggplot(scree_df, aes(x = PC, y = Scree)) +
+  geom_bar(stat = "identity", fill = "skyblue") +
+  labs(title = "Scree Plot for PCA", x = "Principal Component", y = "% Variance Explained")+
+  theme_minimal()
+```
+ 
+Knn value graph
+```{r}
+set.seed(100)
+library(class)
+error_list <- NULL
+
+for (i in 1:10) {
+  dat_knn <- knn(t(subset_renal_data), t(subset_renal_data), sample_groups, k = i, prob = TRUE)
+
+  er1 <- sum(dat_knn[sample_groups == "Normal"] == "Tumor")  # Number of incorrect normal classifications
+  er2 <- sum(dat_knn[sample_groups == "Tumor"] == "Normal")  # Number of correct tumor classifications
+  er_total <- sum(er1, er2) / ncol(pca_scores) * 100  # Total error rate
+
+  error_list <- c(error_list, round(er_total, 1))
+}
+
+plot(c(1:10), error_list, type = "b", col = "blue",
+     xlab = "Number of k", ylab = "% Error in Classification",
+     main = "KNN-Error vs. # of k")
+grid(col = "grey")
+```
+
+6)  Using these linear projections of the original data (i.e. cluster centroids, latent variables, etc.), use a classification method to classify the samples into their respective classes. Make sure to color the samples appropriately by their predicted class membership and use different symbols for the actual class memberships.
+```{r}
+library(class)
+k <- 2
+knn_model <- knn(pca_scores, pca_scores, cl = sample_groups, k = k)
+predicted_classes <- knn_model
+
+plot(pca_scores[, 1], pca_scores[, 2], 
+     xlab = "Principal Component 1", ylab = "Principal Component 2", 
+     main = "PCA: Samples in 2D Space with Predicted Classes", 
+     col = as.numeric(predicted_classes),  # Color by predicted class memberships
+     pch = 9)  # Use solid points (pch = 19)
+legend("topright", legend = levels(predicted_classes), col = c("black", "red"), pch = 9, title = "Predicted Classes")
+
+# points(pca_scores[, 1], pca_scores[, 2],
+#        col = as.numeric(sample_groups),  # Color by actual class memberships
+#        pch = 17)  # Use different symbol (pch = 17) for actual classes
+# legend("bottomleft", legend = levels(sample_groups), col = c("black", "red"), pch = 17, title = "Actual Classes")
+```
+
+7)  Finally, using the top 5 discriminant genes (positive and negative direction) from your analysis, go to NCBI's DAVID and look up the gene information. Provide the gene name and functional information (associated pathways, GO terms, etc) for these 10 genes.
+```{r}
+# Ensure 'sample_groups' is a factor
+sample_groups <- factor(sample_groups)
+
+# Define the design matrix
+design <- model.matrix(~0 + sample_groups)
+
+# Fit linear model
+fit <- lmFit(subset_renal_data, design)
+
+# Perform differential expression analysis
+fit1 <- eBayes(fit)
+# Get the top differentially expressed genes
+top_genes1 <- topTable(fit1, coef = "sample_groupsTumor",sort.by = 't', number = 20)
+top_genes1
+
+# Check the log-fold change values for the top genes
+top_genes1$logFC
+```
+
+tstat
+```{r}
+upregulated_genes1 <- top_genes1[top_genes1$t > 0, ]
+upregulated_genes1
+downregulated_genes1 <- top_genes1[top_genes1$t < 0, ]
+downregulated_genes1
+```
+
+
